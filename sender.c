@@ -6,12 +6,17 @@ void init_sender(Sender *sender, int id) {
     sender->send_id = id;
     sender->input_cmdlist_head = NULL;
     sender->input_framelist_head = NULL;
-    sender->buffer = NULL;
+    sender->arr_buffer = malloc(glb_receivers_array_length * sizeof(LLnode *));
+    memset(sender->arr_buffer, 0, glb_receivers_array_length * sizeof(LLnode *));
 
-    sender->Seq = -1;
-    sender->WS = -1;
-    sender->LAR = -1;
-    sender->LFS = -1;
+    sender->arr_Seq = malloc(glb_receivers_array_length * sizeof(uint8_t));
+    memset(sender->arr_Seq, -1, glb_receivers_array_length);
+    sender->arr_WS = malloc(glb_receivers_array_length * sizeof(uint8_t));
+    memset(sender->arr_WS, -1, glb_receivers_array_length);
+    sender->arr_LAR = malloc(glb_receivers_array_length * sizeof(uint8_t));
+    memset(sender->arr_LAR, -1, glb_receivers_array_length);
+    sender->arr_LFS = malloc(glb_receivers_array_length * sizeof(uint8_t));
+    memset(sender->arr_LFS, -1, glb_receivers_array_length);
 }
 
 struct timeval *sender_get_next_expiring_timeval(Sender *sender) {
@@ -49,28 +54,28 @@ void handle_incoming_acks(Sender *sender, LLnode **outgoing_frames_head_ptr) {
         //目的地址为发送者地址且为确认帧
         if (frame->dest == sender->send_id && (frame->flag & ACK) == ACK) {
             fprintf(stderr, "sender收到ack：%d\n", frame->ack);
-            fprintf(stderr, "sender WS：%d Seq：%d\n", sender->WS, sender->Seq);
+            fprintf(stderr, "sender arr_WS：%d arr_Seq：%d\n", sender->arr_WS[frame->src], sender->arr_Seq[frame->src]);
             //确认帧在合理范围
-            if ((sender->WS <= sender->Seq && (sender->WS < frame->ack && frame->ack <= sender->Seq))
-                || (sender->WS > sender->Seq && (sender->WS < frame->ack || frame->ack <= sender->Seq))) {
+            if ((sender->arr_WS[frame->src] <= sender->arr_Seq[frame->src] && (sender->arr_WS[frame->src] < frame->ack && frame->ack <= sender->arr_Seq[frame->src]))
+                || (sender->arr_WS[frame->src] > sender->arr_Seq[frame->src] && (sender->arr_WS[frame->src] < frame->ack || frame->ack <= sender->arr_Seq[frame->src]))) {
                 fprintf(stderr, "sender收到合理ack：%d\n", frame->ack);
-                LLnode *node_buffer = sender->buffer;
+                LLnode *node_buffer = sender->arr_buffer[frame->src];
                 //遍历缓存找到序列号等于ack的并移除
                 do {
                     fprintf(stderr, "sender遍历缓存seq：%d\n", ((SendPair *) node_buffer->value)->frame->seq);
                     if (((SendPair *) node_buffer->value)->frame->seq == frame->ack) {
                         fprintf(stderr, "sender根据ack：%d移除缓存seq\n", frame->ack);
-                        ll_remove_node(&sender->buffer, node_buffer);   //已确认的帧出列buffer
+                        ll_remove_node(&sender->arr_buffer[frame->src], node_buffer);   //已确认的帧出列buffer
                         //更新窗口起始位置
-                        sender->WS = ll_get_length(sender->buffer) == 0 ? sender->Seq :
-                                     ((SendPair *) sender->buffer->value)->frame->seq - 1;
+                        sender->arr_WS[frame->src] = ll_get_length(sender->arr_buffer[frame->src]) == 0 ? sender->arr_Seq[frame->src] :
+                                                 ((SendPair *) sender->arr_buffer[frame->src]->value)->frame->seq - 1;
                         free(((SendPair *) node_buffer->value)->frame);
                         free(node_buffer->value);
                         free(node_buffer);
                         break;
                     }
                     node_buffer = node_buffer->next;
-                } while (node_buffer != sender->buffer);
+                } while (node_buffer != sender->arr_buffer[frame->src]);
             }
         }
 
@@ -94,11 +99,11 @@ void handle_input_cmds(Sender *sender, LLnode **outgoing_frames_head_ptr) {
     input_cmd_length = ll_get_length(sender->input_cmdlist_head);
     while (input_cmd_length > 0) {
         //序列号不在窗口范围内
-        if (!((sender->WS <= sender->Seq && (sender->Seq - sender->WS) < SLIDE_WINDOW_SIZE)
-              || (sender->WS > sender->Seq && (sender->Seq + 256 - sender->WS) < SLIDE_WINDOW_SIZE))) {
-            fprintf(stderr, "序列号%d不在窗口%d范围内\n", sender->Seq, sender->WS);
-            break;
-        }
+//        if (!((sender->arr_WS <= sender->arr_Seq && (sender->arr_Seq - sender->arr_WS) < SLIDE_WINDOW_SIZE)
+//              || (sender->arr_WS > sender->arr_Seq && (sender->arr_Seq + 256 - sender->arr_WS) < SLIDE_WINDOW_SIZE))) {
+//            fprintf(stderr, "序列号%d不在窗口%d范围内\n", sender->arr_Seq, sender->arr_WS);
+//            break;
+//        }
 
         //弹出一个node并更新input_cmd_length
         LLnode *ll_input_cmd_node = ll_pop_node(&sender->input_cmdlist_head);
@@ -125,7 +130,7 @@ void handle_input_cmds(Sender *sender, LLnode **outgoing_frames_head_ptr) {
             outgoing_frame->checkSum = crc16((const uint8_t *) outgoing_frame, MAX_FRAME_SIZE - 2);
 
             fprintf(stderr, "sender封装帧：%d\n", outgoing_frame->seq);
-            ll_append_node(&sender->buffer, buildSendPair(outgoing_frame)); //将pair添加到缓存队列
+            ll_append_node(&sender->arr_buffer[outgoing_frame->dest], buildSendPair(outgoing_frame)); //将pair添加到缓存队列
 
             offset += maxStrLen;
             msg_length -= maxStrLen;
@@ -136,7 +141,7 @@ void handle_input_cmds(Sender *sender, LLnode **outgoing_frames_head_ptr) {
             outgoing_frame->checkSum = crc16((const uint8_t *) outgoing_frame, MAX_FRAME_SIZE - 2);
 
             fprintf(stderr, "sender封装帧：%d\n", outgoing_frame->seq);
-            ll_append_node(&sender->buffer, buildSendPair(outgoing_frame)); //将pair添加到缓存队列
+            ll_append_node(&sender->arr_buffer[outgoing_frame->dest], buildSendPair(outgoing_frame)); //将pair添加到缓存队列
 
 //            char *outgoing_charbuf = convert_frame_to_char(outgoing_frame); //将消息转换为charbuf
 //            ll_append_node(outgoing_frames_head_ptr, outgoing_charbuf); //将charbuf添加到发送队列
@@ -146,7 +151,9 @@ void handle_input_cmds(Sender *sender, LLnode **outgoing_frames_head_ptr) {
     }
 }
 
-
+/**
+ * deprecated
+ */
 void handle_timedout_frames(Sender *sender, LLnode **outgoing_frames_head_ptr) {
     //TODO: 处理超时数据报的建议步骤
     //    1) 迭代您为每个接收者维护的滑动窗口协议信息
@@ -154,58 +161,15 @@ void handle_timedout_frames(Sender *sender, LLnode **outgoing_frames_head_ptr) {
     //    3) 更新传出帧的下一个超时字段
     struct timeval curtime;
     gettimeofday(&curtime, NULL);   //当前时间
-    LLnode *node_buffer = sender->buffer;
-    if (node_buffer == NULL) {
-        return;
-    }
-    //遍历发送缓存
-    do {
-        struct timeval *time;
-        SendPair *pair = ((SendPair *) node_buffer->value);
-        time = pair->time;
-        long interval = (curtime.tv_sec - time->tv_sec) * 1000000 + (curtime.tv_usec - time->tv_usec);    //时间间隔（微妙）
-        //超时0.05秒重发帧
-        if (interval > 50000) {
-            fprintf(stderr, "sender处理超时%ld消息：%s\n", interval, pair->frame->data);
-            pair->time->tv_sec = curtime.tv_sec;
-            pair->time->tv_usec = curtime.tv_usec;
-            char *outgoing_charbuf = convert_frame_to_char(pair->frame);//将消息转换为charbuf
-            ll_append_node(outgoing_frames_head_ptr, outgoing_charbuf); //将charbuf添加到发送队列
+    for (int i = 0; i < glb_receivers_array_length; ++i) {
+        LLnode *node_buffer = sender->arr_buffer[i];
+        if (node_buffer == NULL) {
+            continue;
         }
-        node_buffer = node_buffer->next;
-    } while (node_buffer != NULL && node_buffer != sender->buffer);
-}
-
-Frame *buildOutgoingFrame(Sender *sender, Cmd *outgoing_cmd) {
-    Frame *outgoing_frame = (Frame *) malloc(sizeof(Frame));
-    memset(outgoing_frame, 0, sizeof(Frame));
-    outgoing_frame->seq = ++sender->Seq;
-    outgoing_frame->src = sender->send_id;
-    outgoing_frame->dest = outgoing_cmd->dst_id;
-    return outgoing_frame;
-}
-
-void handle_pending_frames(Sender *sender, LLnode **outgoing_frames_head_ptr) {
-    struct timeval curtime;
-    gettimeofday(&curtime, NULL);   //当前时间
-    LLnode *node_buffer = sender->buffer;
-    if (node_buffer == NULL) {
-        return;
-    }
-    int count = SLIDE_WINDOW_SIZE;
-    //遍历发送缓存
-    do {
-        SendPair *pair = ((SendPair *) node_buffer->value);
-        //尚未发送
-        if (pair->time == NULL) {
-            setTimeNow(&pair->time); //初始化发送时间
-            fprintf(stderr, "初始化发送时间：%ld|%ld\n", pair->time->tv_sec, pair->time->tv_usec);
-            char *outgoing_charbuf = convert_frame_to_char(pair->frame);//将消息转换为charbuf
-            ll_append_node(outgoing_frames_head_ptr, outgoing_charbuf); //将charbuf添加到发送队列
-        }
-        //已发送(超时/等待ACK)
-        else {
+        //遍历发送缓存
+        do {
             struct timeval *time;
+            SendPair *pair = ((SendPair *) node_buffer->value);
             time = pair->time;
             long interval = (curtime.tv_sec - time->tv_sec) * 1000000 + (curtime.tv_usec - time->tv_usec);    //时间间隔（微妙）
             //超时0.05秒重发帧
@@ -216,10 +180,65 @@ void handle_pending_frames(Sender *sender, LLnode **outgoing_frames_head_ptr) {
                 char *outgoing_charbuf = convert_frame_to_char(pair->frame);//将消息转换为charbuf
                 ll_append_node(outgoing_frames_head_ptr, outgoing_charbuf); //将charbuf添加到发送队列
             }
+            node_buffer = node_buffer->next;
+        } while (node_buffer != NULL && node_buffer != sender->arr_buffer[i]);
+    }
+}
+
+Frame *buildOutgoingFrame(Sender *sender, Cmd *outgoing_cmd) {
+    Frame *outgoing_frame = (Frame *) malloc(sizeof(Frame));
+    memset(outgoing_frame, 0, sizeof(Frame));
+    outgoing_frame->seq = ++sender->arr_Seq[outgoing_cmd->dst_id];
+    outgoing_frame->src = sender->send_id;
+    outgoing_frame->dest = outgoing_cmd->dst_id;
+    return outgoing_frame;
+}
+
+void handle_pending_frames(Sender *sender, LLnode **outgoing_frames_head_ptr) {
+    struct timeval curtime;
+    gettimeofday(&curtime, NULL);   //当前时间
+    for (int i = 0; i < glb_receivers_array_length; ++i) {
+        LLnode *node_buffer = sender->arr_buffer[i];
+        if (node_buffer == NULL) {
+            continue;
         }
-        node_buffer = node_buffer->next;
-        count--;
-    } while (node_buffer != NULL && node_buffer != sender->buffer && count > 0);
+        uint8_t WE = (((SendPair *) node_buffer->value)->frame->seq + SLIDE_WINDOW_SIZE - 1) % 256;
+        int count = SLIDE_WINDOW_SIZE;
+        SendPair *pair = ((SendPair *) node_buffer->value);;
+        //遍历发送缓存
+        do {
+            //尚未发送
+            if (pair->time == NULL) {
+                setTimeNow(&pair->time); //初始化发送时间
+                fprintf(stderr, "初始化发送时间：%ld|%ld\n", pair->time->tv_sec, pair->time->tv_usec);
+                char *outgoing_charbuf = convert_frame_to_char(pair->frame);//将消息转换为charbuf
+                ll_append_node(outgoing_frames_head_ptr, outgoing_charbuf); //将charbuf添加到发送队列
+                fprintf(stderr, "sender添加%d到发送队列：%s\n", pair->frame->seq, pair->frame->data);
+            }
+                //已发送(超时/等待ACK)
+            else {
+                struct timeval *time;
+                time = pair->time;
+                long interval =
+                        (curtime.tv_sec - time->tv_sec) * 1000000 + (curtime.tv_usec - time->tv_usec);    //时间间隔（微妙）
+                //超时0.05秒重发帧
+                if (interval > 50000) {
+                    fprintf(stderr, "sender处理超时%ld消息：%s\n", interval, pair->frame->data);
+                    pair->time->tv_sec = curtime.tv_sec;
+                    pair->time->tv_usec = curtime.tv_usec;
+                    char *outgoing_charbuf = convert_frame_to_char(pair->frame);//将消息转换为charbuf
+                    ll_append_node(outgoing_frames_head_ptr, outgoing_charbuf); //将charbuf添加到发送队列
+                    fprintf(stderr, "sender添加%d到发送队列：%s\n", pair->frame->seq, pair->frame->data);
+                }
+            }
+            node_buffer = node_buffer->next;
+            pair = ((SendPair *) node_buffer->value);
+            count--;
+        } while (node_buffer != NULL && node_buffer != sender->arr_buffer[i] && count > 0 &&
+                 ((sender->arr_WS[i] <= pair->frame->seq && (pair->frame->seq - sender->arr_WS[i]) < SLIDE_WINDOW_SIZE)
+                  || (sender->arr_WS[i] > pair->frame->seq &&
+                      (pair->frame->seq + 256 - sender->arr_WS[i]) < SLIDE_WINDOW_SIZE)));
+    }
 
 }
 

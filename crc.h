@@ -1,5 +1,5 @@
 //
-// Created by 84358 on 2023/10/8.
+// Created by Magic_Grass on 2023/10/8.
 //
 
 #ifndef PROJECT2_CRC_H

@@ -84,11 +84,11 @@ struct Receiver_t {
     LLnode *input_framelist_head;
     int recv_id;
 
-    Frame **buffer; //缓存，直接存储Frame类型
+    Frame ***arr_buffer; //缓存数组，直接存储Frame类型数组
 
-    uint8_t Seq;//帧编号
+    uint8_t *arr_Seq;//帧编号数组
 
-    uint8_t WS; //窗口起始
+    uint8_t *arr_WS; //窗口起始数组
 };
 
 struct Sender_t {
@@ -99,14 +99,14 @@ struct Sender_t {
     LLnode *input_framelist_head;
     int send_id;
 
-    LLnode *buffer; //缓存，直接存储SendPair类型
+    LLnode **arr_buffer; //缓存数组，直接存储SendPair类型数组
 
-    uint8_t Seq;//帧编号
+    uint8_t *arr_Seq;//帧编号数组
 
-    uint8_t WS; //窗口起始
-    uint8_t WE; //窗口终止
-    uint8_t LAR;//最近收到的确认帧
-    uint8_t LFS;//最近发送的帧
+    uint8_t *arr_WS; //窗口起始数组
+    uint8_t *arr_WE; //窗口终止
+    uint8_t *arr_LAR;//最近收到的确认帧
+    uint8_t *arr_LFS;//最近发送的帧
 };
 
 static enum SendFrame_DstType {

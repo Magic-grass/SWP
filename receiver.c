@@ -7,11 +7,18 @@ void init_receiver(Receiver *receiver,
                    int id) {
     receiver->recv_id = id;
     receiver->input_framelist_head = NULL;
-    receiver->buffer = malloc(SLIDE_WINDOW_SIZE * sizeof(Frame *));
-    memset(receiver->buffer, 0, SLIDE_WINDOW_SIZE * sizeof(Frame *));
 
-    receiver->Seq = -1;
-    receiver->WS = -1;
+    receiver->arr_buffer = malloc(glb_senders_array_length * sizeof(Frame **));
+    memset(receiver->arr_buffer, 0, glb_senders_array_length * sizeof(Frame **));
+    for (int i = 0; i < glb_senders_array_length; ++i) {
+        receiver->arr_buffer[i] = malloc(SLIDE_WINDOW_SIZE * sizeof(Frame *));
+        memset(receiver->arr_buffer[i], 0, SLIDE_WINDOW_SIZE * sizeof(Frame *));
+    }
+
+    receiver->arr_Seq = malloc(glb_senders_array_length * sizeof(uint8_t));
+    memset(receiver->arr_Seq, -1, glb_senders_array_length);
+    receiver->arr_WS = malloc(glb_senders_array_length * sizeof(uint8_t));
+    memset(receiver->arr_WS, -1, glb_senders_array_length);
 }
 
 Frame *buildAck(Receiver *receiver, Frame *inframe) {
@@ -19,7 +26,7 @@ Frame *buildAck(Receiver *receiver, Frame *inframe) {
     Frame *outframe = (Frame *) malloc(sizeof(Frame));
     memset(outframe, 0, sizeof(Frame));
 //        strcpy(outframe->data, outgoing_cmd->message);
-    outframe->seq = ++receiver->Seq;
+    outframe->seq = ++receiver->arr_Seq[inframe->src];
     outframe->src = inframe->dest;
     outframe->dest = inframe->src;
     outframe->ack = inframe->seq;
@@ -71,39 +78,42 @@ void handle_incoming_msgs(Receiver *receiver,
         //帧目标接收为本接收者
         if (inframe->dest == receiver->recv_id) {
             fprintf(stderr, "receiver接收到属于消息\n");
-            fprintf(stderr, "receiver接收消息序列号%d窗口%d\n", inframe->seq, receiver->WS);
+            fprintf(stderr, "receiver接收消息序列号%d窗口%d\n", inframe->seq, receiver->arr_WS[inframe->src]);
             //判断为新消息，回复ack
-            if ((receiver->WS < inframe->seq && inframe->seq <= receiver->WS + SLIDE_WINDOW_SIZE)
-                || (inframe->seq < receiver->WS && inframe->seq + 256 <= receiver->WS + SLIDE_WINDOW_SIZE)) {
+            if ((receiver->arr_WS[inframe->src] < inframe->seq && inframe->seq <= receiver->arr_WS[inframe->src] + SLIDE_WINDOW_SIZE)
+                || (inframe->seq < receiver->arr_WS[inframe->src] && inframe->seq + 256 <= receiver->arr_WS[inframe->src] + SLIDE_WINDOW_SIZE)) {
                 //新消息添加到接收缓存
-                int pos = (inframe->seq < receiver->WS ? inframe->seq + 256 : inframe->seq) - receiver->WS - 1;
+                int pos = (inframe->seq < receiver->arr_WS[inframe->src] ? inframe->seq + 256 : inframe->seq) - receiver->arr_WS[inframe->src] - 1;
                 fprintf(stderr, "receiver缓存下标：%d\n", pos);
-                receiver->buffer[pos] = inframe;
+                receiver->arr_buffer[inframe->src][pos] = inframe;
                 fprintf(stderr, "receiver缓存新消息：%s\n", inframe->data);
+                //构建ack
+                fprintf(stderr, "receiver构建回复：%hhu\n", inframe->seq);
+                Frame *outframe = buildAck(receiver, inframe);
+                fprintf(stderr, "receiver回复ack：%hhu\n", outframe->ack);
 
                 //整合连续帧并输出消息
-                if (receiver->buffer[0] != NULL) {
-                    const char *message = mergeMessage(receiver);
+                if (receiver->arr_buffer[inframe->src][0] != NULL) {
+                    mergeMessage(receiver, inframe->src);
                     //打印消息
 //                    printf("<RECV-%d>:[%s]\n", receiver->recv_id, message);
                 }
 
                 //发送ack
-                Frame *outframe = buildAck(receiver, inframe);  //构建ack
                 char *char_buf = convert_frame_to_char(outframe);
                 free(outframe);
                 ll_append_node(outgoing_frames_head_ptr, char_buf); //添加到发送队列
             }
-/*            else if (inframe->seq == receiver->WS ||
-                     (inframe->seq < receiver->WS && (inframe->seq + 2 * SLIDE_WINDOW_SIZE >= receiver->WS)) ||
-                     (receiver->WS < inframe->seq && (inframe->seq + 2 * SLIDE_WINDOW_SIZE >= receiver->WS + 256))) {*/
             //旧消息，回复ack
             else {
                 fprintf(stderr, "receiver收到旧消息：%s\n", inframe->data);
                 //发送ack
+                fprintf(stderr, "receiver构建回复：%hhu\n", inframe->seq);
                 Frame *outframe = buildAck(receiver, inframe);  //构建ack
+                fprintf(stderr, "receiver回复ack：%hhu\n", outframe->ack);
                 char *char_buf = convert_frame_to_char(outframe);
                 free(outframe);
+                free(inframe);
                 ll_append_node(outgoing_frames_head_ptr, char_buf); //添加到发送队列
             }
         }

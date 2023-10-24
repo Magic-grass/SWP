@@ -53,3 +53,8 @@ dkms.conf
 
 /cmake-build-debug-wsl/
 /.idea/
+/.debug_output.*
+/.expected_output.*
+/.output.*
+/project2
+/USER202334261367

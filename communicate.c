@@ -59,7 +59,7 @@ void send_frame(char * char_buffer,
          i < array_length;
          i++)
     {
-        //Allocate a per receiver char buffer for the message
+        //Allocate a per receiver char arr_buffer for the message
         per_recv_char_buffer = (char *) malloc(sizeof(char) * MAX_FRAME_SIZE);
         memcpy(per_recv_char_buffer,
                char_buffer,
